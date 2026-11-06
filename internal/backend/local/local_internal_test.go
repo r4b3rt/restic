@@ -3,38 +3,36 @@ package local
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"syscall"
 	"testing"
 
-	"github.com/restic/restic/internal/restic"
+	"github.com/restic/restic/internal/backend"
 	rtest "github.com/restic/restic/internal/test"
 
 	"github.com/cenkalti/backoff/v4"
 )
 
 func TestNoSpacePermanent(t *testing.T) {
-	oldOpenFile := openFile
+	oldTempFile := tempFile
 	defer func() {
-		openFile = oldOpenFile
+		tempFile = oldTempFile
 	}()
 
-	openFile = func(name string, flags int, mode os.FileMode) (*os.File, error) {
-		// The actual error from os.OpenFile is *os.PathError.
-		// Other functions called inside Save may return *os.SyscallError.
-		return nil, os.NewSyscallError("open", syscall.ENOSPC)
+	tempFile = func(_, _ string) (*os.File, error) {
+		return nil, fmt.Errorf("not creating tempfile, %w", syscall.ENOSPC)
 	}
 
-	dir, cleanup := rtest.TempDir(t)
-	defer cleanup()
+	dir := rtest.TempDir(t)
 
-	be, err := Open(context.Background(), Config{Path: dir})
+	be, err := Open(context.Background(), Config{Path: dir, Connections: 2}, t.Logf)
 	rtest.OK(t, err)
 	defer func() {
 		rtest.OK(t, be.Close())
 	}()
 
-	h := restic.Handle{Type: restic.ConfigFile}
+	h := backend.Handle{Type: backend.ConfigFile}
 	err = be.Save(context.Background(), h, nil)
 	_, ok := err.(*backoff.PermanentError)
 	rtest.Assert(t, ok,
